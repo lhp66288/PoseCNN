@@ -35,7 +35,7 @@
         feature2 = self.embedding2(feature1)
         return feature1, feature2
         
-# Feature Extraction
+# SegmentationBranch
     class SegmentationBranch(nn.Module):
 
     def __init__(self, num_classes = 10, hidden_layer_dim = 64):
@@ -163,4 +163,115 @@
         bbx = torch.tensor(bbx).to(device)
         return bbx
 
+# TranslationBranch
+    class TranslationBranch(nn.Module):
+  
+    def __init__(self, num_classes = 10, hidden_layer_dim = 128):
+        super(TranslationBranch, self).__init__()
+        #类别数
+        self.num_classes = num_classes
 
+        #与实例分割部分类似，区别是输出通道数由64变成了128
+        feat1 = []
+        conv1=nn.Conv2d(512, hidden_layer_dim, 1, stride=1)
+        nn.init.kaiming_normal_(conv1.weight)
+        conv1.bias.data.fill_(0.0)
+        feat1.append(conv1)
+        feat1.append(nn.ReLU())
+        self.feat1 = nn.Sequential(*feat1)
+
+        feat2 = []
+        conv2=nn.Conv2d(512, hidden_layer_dim, 1, stride=1)
+        nn.init.kaiming_normal_(conv2.weight)
+        conv2.bias.data.fill_(0.0)
+        feat2.append(conv2)
+        feat2.append(nn.ReLU())
+        self.feat2 = nn.Sequential(*feat2)
+
+        #输出通道数为3*num_classes，分别为每个类别的中心点x坐标，y坐标，深度z坐标
+        fin_prob = []
+        conv3=nn.Conv2d(hidden_layer_dim, 3*num_classes, 1, stride=1)
+        nn.init.kaiming_normal_(conv3.weight)
+        conv3.bias.data.fill_(0.0)
+        fin_prob.append(conv3)
+        # fin_prob.append(nn.ReLU())
+        self.fin_prob = nn.Sequential(*fin_prob)
+
+    def forward(self, feature1, feature2):
+       
+        translation = None
+        #与分割部分相似的向上采样，恢复到原图像的尺寸大小
+        inter_feat1 = self.feat1(feature1)
+        inter_feat2 = self.feat2(feature2)
+        inter_feat2_up2 = nn.functional.interpolate(inter_feat2, scale_factor=2, mode="nearest")
+        inter_feat = inter_feat1 + inter_feat2_up2
+
+        translation_1 = self.fin_prob(inter_feat)
+        translation = nn.functional.interpolate(translation_1, size= (480,640), mode="bilinear", align_corners=True)
+
+        return translation
+
+# RotationBranch
+    class RotationBranch(nn.Module):
+
+    def __init__(self, feature_dim = 512, roi_shape = 7, hidden_dim = 4096, num_classes = 10):
+        super(RotationBranch, self).__init__()
+
+        ######################################################################
+        # TODO: Initialize layers of rotation branch for PoseCNN.            #
+        # It is recommended that you initialize each convolution kernel with #
+        # the kaiming_normal initializer and each bias vector to zeros.      #
+        ######################################################################
+        # Replace "pass" statement with your code
+        three_fc_layers = []
+        linear1=nn.Linear(feature_dim*roi_shape*roi_shape, hidden_dim)
+        nn.init.kaiming_normal_(linear1.weight)
+        linear1.bias.data.fill_(0.0)
+        three_fc_layers.append(linear1)
+        
+        linear2=nn.Linear(hidden_dim, hidden_dim)
+        nn.init.kaiming_normal_(linear2.weight)
+        linear2.bias.data.fill_(0.0)
+        three_fc_layers.append(linear2)
+        
+        linear3=nn.Linear(hidden_dim, 4*num_classes)
+        nn.init.kaiming_normal_(linear3.weight)
+        linear3.bias.data.fill_(0.0)
+        three_fc_layers.append(linear3)
+        self.three_fc_layers = nn.Sequential(*three_fc_layers)
+
+        self.roi1 = RoIPool(output_size=(roi_shape,roi_shape), spatial_scale = 1/8)
+        self.roi2 = RoIPool(output_size=(roi_shape,roi_shape), spatial_scale = 1/16)
+        self.flatten = nn.Flatten()
+        ######################################################################
+        #                            END OF YOUR CODE                        #
+        ######################################################################
+
+
+    def forward(self, feature1, feature2, bbx):
+        """
+        Args:
+            feature1: Features from feature extraction backbone (B, 512, h, w)
+            feature2: Features from feature extraction backbone (B, 512, h//2, w//2)
+            bbx: Bounding boxes of regions of interst (N, 5) with (batch_ids, x1, y1, x2, y2)
+        Returns:
+            quaternion: Regressed components of a quaternion for each class at each ROI.
+                quaternion size: (N,4*num_classes)
+        """
+        quaternion = None
+
+        ######################################################################
+        # TODO: Implement forward pass of rotation branch.                   #
+        ######################################################################
+        # Replace "pass" statement with your code
+        feature1_roi = self.roi1(feature1.float(), bbx.float())
+        feature2_roi = self.roi2(feature2.float(), bbx.float())
+        feat_int = feature1_roi + feature2_roi
+        feat = self.flatten(feat_int)
+
+        quaternion = self.three_fc_layers(feat)
+        ######################################################################
+        #                            END OF YOUR CODE                        #
+        ######################################################################
+
+        return quaternion
