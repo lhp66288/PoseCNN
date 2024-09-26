@@ -216,16 +216,13 @@
 
     def __init__(self, feature_dim = 512, roi_shape = 7, hidden_dim = 4096, num_classes = 10):
         super(RotationBranch, self).__init__()
-
-        ######################################################################
-        # TODO: Initialize layers of rotation branch for PoseCNN.            #
-        # It is recommended that you initialize each convolution kernel with #
-        # the kaiming_normal initializer and each bias vector to zeros.      #
-        ######################################################################
-        # Replace "pass" statement with your code
+        #定义了三个全连接层
         three_fc_layers = []
+        #？输入通道数为什么是feature_dim*roi_shape*roi_shape
         linear1=nn.Linear(feature_dim*roi_shape*roi_shape, hidden_dim)
+        #初始化linear1的权重
         nn.init.kaiming_normal_(linear1.weight)
+        #将linear1的偏置想初始化为0
         linear1.bias.data.fill_(0.0)
         three_fc_layers.append(linear1)
         
@@ -240,38 +237,25 @@
         three_fc_layers.append(linear3)
         self.three_fc_layers = nn.Sequential(*three_fc_layers)
 
+        #定义了两个 RoIPool 层，用于对特征图进行区域池化操作，得到固定大小的 RoI。
+        #spatial_scale将原始图像空间映射到特征图空间，通常用于调整 RoI 坐标，以匹配特征图相对于原始图像的缩放比例
         self.roi1 = RoIPool(output_size=(roi_shape,roi_shape), spatial_scale = 1/8)
         self.roi2 = RoIPool(output_size=(roi_shape,roi_shape), spatial_scale = 1/16)
         self.flatten = nn.Flatten()
-        ######################################################################
-        #                            END OF YOUR CODE                        #
-        ######################################################################
 
 
     def forward(self, feature1, feature2, bbx):
-        """
-        Args:
-            feature1: Features from feature extraction backbone (B, 512, h, w)
-            feature2: Features from feature extraction backbone (B, 512, h//2, w//2)
-            bbx: Bounding boxes of regions of interst (N, 5) with (batch_ids, x1, y1, x2, y2)
-        Returns:
-            quaternion: Regressed components of a quaternion for each class at each ROI.
-                quaternion size: (N,4*num_classes)
-        """
-        quaternion = None
 
-        ######################################################################
-        # TODO: Implement forward pass of rotation branch.                   #
-        ######################################################################
-        # Replace "pass" statement with your code
+        quaternion = None
+        #feature1_roi 和 feature2_roi 是通过 RoIPool 层从 feature1 和 feature2 中提取的 RoI。
         feature1_roi = self.roi1(feature1.float(), bbx.float())
         feature2_roi = self.roi2(feature2.float(), bbx.float())
+        #将两个 RoI 特征相加
         feat_int = feature1_roi + feature2_roi
+        #在神经网络中，"展平"（Flattening）是一种常见的操作，它将多维的输入转换成一维的向量。
+        #这通常在卷积层和全连接层之间进行，因为卷积层输出的是具有空间维度的特征图，而全连接层则需要一维的输入向量。
         feat = self.flatten(feat_int)
 
         quaternion = self.three_fc_layers(feat)
-        ######################################################################
-        #                            END OF YOUR CODE                        #
-        ######################################################################
 
         return quaternion
